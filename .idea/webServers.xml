@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="04fca77b-8219-431e-8725-e9c9a600500a" name="192.168.171.130" url="http://192.168.171.130">
+        <fileTransfer rootFolder="/home/wxwmd" accessType="SFTP" host="192.168.171.130" port="22" sshConfigId="bdb382ad-9ca1-4f62-8ba9-3bd5595faa35" sshConfig="wxwmd@192.168.171.130:22 password">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>
