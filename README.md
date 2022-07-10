@@ -1,46 +1,19 @@
-# MiVeCC_with_DRL
-This is a Multi-intersection Vehicular Cooperative Control (MiVeCC) scheme to enable cooperation among vehicles in a 3*3 unsignalized intersections. we proposed a algorithm combined heuristic-rule and two-stage deep reinforcement learning. The heuristic-rule achieves vehicles across the intersections without collisions. Based on the heuristic-rule, DDPG is used to optimize the collaborative control of vehicles and improve the traffic efficiency. Simulation results show that the proposed algorithm can improve travel efficiency at multiple intersections by up to 4.59 times without collision compared with existing methods.
-
-A Multi-intersection Vehicular Cooperative Control based on End-Edge-Cloud Computing|[paper](https://arxiv.org/pdf/2012.00500.pdf)
-
-![visible](https://github.com/Mingtzge/MiVeCC_with_DRL/blob/main/show_imgs/multi.gif)
-
-## Prerequisites
-- Linux or macOS
-- Python 3
-- matlab 2017b
-- CPU or NVIDIA GPU + CUDA CuDNN
-### python modules
-- numpy==1.16.2
-- opencv-contrib-python==3.4.2.16
-- opencv-python==4.2.0.32
-- tensorflow==1.12.0
-- matplotlib==3.0.2
-- scipy==1.2.1 
-
-## Getting Started
-### Installation
-- Clone this repo:
-```bash
-git clone https://github.com/Mingtzge/MiVeCC_with_DRL.git
-cd MiVeCC_with_DRL
-```
-
-
-### 预训练模型，多个路口(End_edge_cloud)
+### 预训练模型，多个路口(end_edge_cloud)
 ```
 python MiVeCC_main.py --s_exp_name Edge_baseline --mat_path arvTimeNewVeh_new_900_multi3_3.mat --priori_knowledge --type test --m_exp_name Cloud_baseline --visible --video_name test
 ```
 
-### Cloud train/test (on the "main" branch)
-- generate the arriveTime file
-```bash
+### 训练模型，多个路口（end_edge_cloud）:
+```
+python MiVeCC_main.py --mat_path arvTimeNewVeh_new_900_multi3_3.mat --type m_train --priori_knowledge --m_exp_name cloud_demo
+```
+
+
+### 生成初始的环境文档
+```
 matlab gen_multi_arvTime.m
 ```
-- Train a model:
-```
-python MiVeCC_main.py --mat_path arvTimeNewVeh_new_900_multi3_3_l.mat --type train --priori_knowledge --exp_name cloud_demo
-```
+
 To see more intermediate results, run 
 ```
 tensorboard --logdir ./model_data/cloud_demo/log

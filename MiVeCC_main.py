@@ -1,20 +1,21 @@
 # 模型训练的主代码
-import numpy as np
-import tensorflow as tf
-import os
-import scipy.io as scio
 import argparse
-import cv2
 import copy
-from PIL import Image
-from shutil import copyfile
-import matplotlib.pyplot as plt
-from traffic_interaction_scene import MultiTrafficInteraction
-from traffic_interaction_scene import MultiVisible
+import os
+import sys
 import time
+from shutil import copyfile
+
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy.io as scio
+import tensorflow as tf
+
 from model import MADDPG, M_MADDPG
 from replay_buffer import ReplayBuffer
-import sys
+from traffic_interaction_scene import MultiTrafficInteraction
+from traffic_interaction_scene import MultiVisible
 
 
 def create_init_update(oneline_name, target_name, tau=0.99):
@@ -89,8 +90,8 @@ def parse_args():
     parser.add_argument("--txt", type=str, default="pt_record",
                         help="the file name of recoding passed time")
     # Checkpointing
-    parser.add_argument("--s_exp_name", type=str, default="s_test", help="name of the experiment")  # 单路口模型实验名
-    parser.add_argument("--m_exp_name", type=str, default="m_test", help="name of the experiment")  # 多路口模型实验名
+    parser.add_argument("--s_exp_name", type=str, default="Edge_baseline", help="name of the experiment")  # 单路口模型实验名
+    parser.add_argument("--m_exp_name", type=str, default="Cloud_baseline", help="name of the experiment")  # 多路口模型实验名
     parser.add_argument("--type", type=str, default="m_train", help="type of experiment train or test")
     parser.add_argument("--mat_path", type=str, default="./arvTimeNewVeh_new_900_l.mat", help="the path of mat file")
     parser.add_argument("--save_dir", type=str, default="model_data",
@@ -116,30 +117,6 @@ def parse_args():
                         help="directory where plot data is saved")  # 训练曲线的目录
     parser.add_argument("--log", type=str, default="output.txt",
                         help="the name of output log file")  # 训练曲线的目录
-    # model hyper-parameters
-    # parser.add_argument('--image_size', type=int, default=600)
-    # # training hyper-parameters
-    # parser.add_argument('--cri_img_ch', type=int, default=1)
-    # parser.add_argument('--act_img_ch', type=int, default=3)
-    # parser.add_argument('--output_ch', type=int, default=1)
-    # parser.add_argument('--num_epochs', type=int, default=100)
-    # parser.add_argument('--num_epochs_decay', type=int, default=70)
-    # parser.add_argument('--num_workers', type=int, default=2)
-    # parser.add_argument('--lr', type=float, default=0.0002)
-    # parser.add_argument('--beta1', type=float, default=0.5)  # momentum1 in Adam
-    # parser.add_argument('--beta2', type=float, default=0.999)  # momentum2 in Adam
-    # parser.add_argument('--augmentation_prob', type=float, default=0.4)
-    #
-    # parser.add_argument('--log_step', type=int, default=2)
-    # parser.add_argument('--val_step', type=int, default=2)
-    #
-    # # misc
-    # parser.add_argument('--mode', type=str, default='train')
-    # parser.add_argument('--cri_model_type', type=str, default='AlexNet', help="AlexNet/ResNet50/ResNet101/ResNet152")
-    # parser.add_argument('--act_model_type', type=str, default='UNet', help="UNet")
-    # parser.add_argument('--model_path', type=str, default='./models')
-    # parser.add_argument('--result_path', type=str, default='./result/')
-    # parser.add_argument('--cuda_idx', type=int, default=1)
     return parser.parse_args()
 
 
@@ -388,8 +365,12 @@ def multi_intersections_train():
     multi_sections = tf.Graph()
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
+    # edge端神经网络
     sess1 = tf.Session(config=config, graph=single_section)
+    # cloud端神经网络
     sess_m = tf.Session(config=config, graph=multi_sections)
+
+    # edge端神经网络初始化
     with sess1.as_default():
         with sess1.graph.as_default():
             agent1_ddpg_test = MADDPG('agent1', actor_lr=args.actor_lr, critic_lr=args.critic_lr,
@@ -397,12 +378,13 @@ def multi_intersections_train():
             saver_s = tf.train.Saver()
 
             sess1.run(tf.global_variables_initializer())
-            # saver.restore(sess, './three_ma_weight/40.cptk')
             model_path = os.path.join(args.save_dir, args.s_exp_name, "test_best.cptk")
             if not os.path.exists(model_path + ".meta"):
                 model_path = tf.train.latest_checkpoint(os.path.join(args.save_dir, args.s_exp_name))
             saver_s.restore(sess1, model_path)
             print("load single_section cptk file from " + model_path)
+
+    # cloud端神经网络初始化
     with sess_m.as_default():
         with sess_m.graph.as_default():
             agent_m_ddpg = M_MADDPG('agent_m', actor_lr=args.actor_lr, critic_lr=args.critic_lr,
@@ -438,24 +420,28 @@ def multi_intersections_train():
                     model_path = tf.train.latest_checkpoint(os.path.join(args.save_dir, args.m_exp_name))
                 saver_m.restore(sess_m, model_path)
                 print("load multi_section cptk file from " + model_path)
+
     # 设置经验池最大空间
     agent1_memory = ReplayBuffer(50000)
     reward_list = []
-    collisions_list = []
     statistic_count = 0
     mean_window_length = 10
-    rate_latest = 1.0
     test_pt_smallest = 1000
-    data = scio.loadmat(args.mat_path)  # 加载.mat数据
+    # 加载.mat数据，初始化环境
+    data = scio.loadmat(args.mat_path)
     arrive_time = data["arvTimeNewVeh"]
     env = MultiTrafficInteraction(arrive_time, args)
     collisions_count = 0
     count_n = 0
     time_total = []
+    # 三种不同密度的环境
     mat_file = ["arvTimeNewVeh_300.mat", "arvTimeNewVeh_600.mat", "arvTimeNewVeh_900.mat"]
+
+    # 开始训练
     for epoch in range(args.num_episodes):
         if args.evaluation:
             evaluation(epoch, agent1_ddpg_test, agent_m_ddpg, sess1, sess_m)
+        # 是否采用多密度轮番训练
         if args.multi_density:
             mat_path = mat_file[epoch % 3]
             data = scio.loadmat(mat_path)  # 加载.mat数据
@@ -468,9 +454,6 @@ def multi_intersections_train():
                     o_actions = agent1_ddpg_test.action(env.ogm_total_s, sess1)
             with sess_m.as_default():
                 with sess_m.graph.as_default():
-                    # if count_n > 100:
-                    #     online_var = [i for i in tf.trainable_variables() if "agent_m_actor" in i.name]
-                    #     print(sess_m.run(online_var[0]))
                     m_actions = agent_m_ddpg.action([env.ogm_total_m], sess_m)
             actions = m_actions[0]
             v_m, acc_m, c_rate = env.step(o_actions, actions, i % 2)
@@ -707,7 +690,13 @@ def record_data(env, single=False, density="2100", layer="EEC", n=""):
                 seq[lane], p[0], p[1], float(env.veh_info[lane][veh_id]["v"]), float(env.veh_info[lane][veh_id]["a"])))
     d_w.close()
 
-
+'''
+多路口测试
+1. 生成环境
+2. 加载已经训练好的edge端神经网络和cloud端神经网络
+3. 对车辆进行控制
+4. 绘制
+'''
 def multi_intersections_test():
     single_section = tf.Graph()
     multi_sections = tf.Graph()
@@ -745,7 +734,8 @@ def multi_intersections_test():
 
     collisions_count = 0
     if True:
-        data = scio.loadmat(args.mat_path)  # 加载.mat数据
+        # 加载.mat数据，就是生成的环境
+        data = scio.loadmat(args.mat_path)
         arrive_time = data["arvTimeNewVeh"]
         visible = MultiVisible(l_mode="actual")
         env = MultiTrafficInteraction(arrive_time, args)
@@ -757,8 +747,8 @@ def multi_intersections_test():
             video_writer = cv2.VideoWriter(os.path.join("results_img", args.video_name + ".avi"),
                                            cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), fps, size)
         vehicles_v = []
-        # if collisions_count > 0:
-        #     break
+
+        # 开始使用模型来进行车辆控制
         for i in range(6000):
             with sess1.as_default():
                 with sess1.graph.as_default():
@@ -781,8 +771,7 @@ def multi_intersections_test():
                 vehicles_v.append([len(vehicles_v)] + v_v)
             collisions_count += collisions
 
-            if i == 5390:
-                stop = 1
+            # 每100个决策过程画一张图
             if i % 100 == 0:
                 print("i: %s collisions_rate: %s; control rate: %s" % (
                     i, float(collisions_count) / env.id_seq, c_rate))
@@ -847,14 +836,7 @@ def multi_intersections_test():
                                                                  env.passed_veh,
                                                                  float(env.passed_veh_step_total) / (
                                                                          env.passed_veh + 0.0001) * env.deltaT))
-        # plt.figure(1)
-        # plt.plot(np.array(vehicles_v)[:, 0], np.array(vehicles_v)[:, 1], "r")
-        # plt.plot(np.array(vehicles_v)[:, 0], np.array(vehicles_v)[:, 2], "g")
-        # plt.legend(["v_mean", "num_vehicles"])
-        # plt.xlabel("time [s]")
-        # plt.ylabel("value")
-        # plt.show()
-        # plt.close(i)
+
     sess1.close()
     sess_m.close()
 
