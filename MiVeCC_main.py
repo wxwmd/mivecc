@@ -47,8 +47,10 @@ def get_agents_action(sta, sess, agent, noise_range=0.0):
     return agent1_action
 
 
+# 训练模型
 def train_agent(agent_ddpg, agent_ddpg_target, agent_memory, agent_actor_target_update,
                 agent_critic_target_update, sess, summary_writer, args):
+    # 从经验池中进行采样
     total_obs_batch, total_act_batch, rew_batch, total_next_obs_batch, done_mask = agent_memory.sample(
         args.batch_size)
     total_next_obs_batch = np.array(total_next_obs_batch)
@@ -56,10 +58,13 @@ def train_agent(agent_ddpg, agent_ddpg_target, agent_memory, agent_actor_target_
     total_act_batch = np.array(total_act_batch)
     act_next = agent_ddpg_target.action(total_next_obs_batch, sess)
     rew_batch = np.array(rew_batch)
+    # target等于直接获得的reward+ γ*下一状态的最大回报
     target = rew_batch.reshape(-1, 1) + args.gamma * agent_ddpg_target.Q(
         state=total_next_obs_batch, action=act_next, sess=sess)
+    # 训练actor网络
     agent_ddpg.train_actor(state=total_obs_batch, action=total_act_batch, sess=sess, summary_writer=summary_writer,
                            lr=args.actor_lr)
+    # 训练critic网络
     agent_ddpg.train_critic(state=total_obs_batch, action=total_act_batch, target=target, sess=sess,
                             summary_writer=summary_writer, lr=args.critic_lr)
 
@@ -446,28 +451,42 @@ def multi_intersections_train():
             mat_path = mat_file[epoch % 3]
             data = scio.loadmat(mat_path)  # 加载.mat数据
             arrive_time = data["arvTimeNewVeh"]
+            # 创建环境
             env = MultiTrafficInteraction(arrive_time, args)
         for i in range(1000):
             state_now = copy.deepcopy(env.ogm_total_m)
+            # 使用edge端预测每个路口的15个车的action
             with sess1.as_default():
                 with sess1.graph.as_default():
+                    # ogm_total_s (9,15,15,3) 每个路口15个车的状态
+                    # o_actions (9,15) 值表示edge端给出的加速度，9个路口的车的action
                     o_actions = agent1_ddpg_test.action(env.ogm_total_s, sess1)
             with sess_m.as_default():
                 with sess_m.graph.as_default():
+                    # ogm_total_m (60,60,3) 全局60个车的状态
+                    # m_actions (60) 值表示cloud端给出的加速度，60个车的action
                     m_actions = agent_m_ddpg.action([env.ogm_total_m], sess_m)
             actions = m_actions[0]
+
+            # 根据edge，cloud给出的action，每个车做出行动，整个环境进入下一状态
             v_m, acc_m, c_rate = env.step(o_actions, actions, i % 2)
+            # 计算在这次状态转移过程中得到的reward，碰撞次数
             reward, collisions, v_v = env.scene_update()
             reward_list.append(reward)
             reward_list = reward_list[-mean_window_length:]
             collisions_count += collisions
+            # 把整个过程放到经验池里面
             agent1_memory.add(np.array(state_now), np.array(actions), reward, np.array(env.ogm_total_m),
                               False)
+
+            # 经验池里面的条目达到一个数量
+            # 抽出来一批数据进行训练
             if count_n > 500:
                 statistic_count += 1
                 time_t = time.time()
                 with sess_m.as_default():
                     with sess_m.graph.as_default():
+                        # 训练sess_m，即cloud端预测器
                         train_agent(agent_m_ddpg, agent_m_ddpg_target, agent1_memory,
                                     agent_m_actor_target_update, agent_m_critic_target_update, sess_m, summary_writer,
                                     args)
@@ -490,14 +509,13 @@ def multi_intersections_train():
                                     args.actor_lr, args.critic_lr, np.mean(time_total)))
             env.delete_vehicle()
             count_n += 1
+
+        # 保存模型，生成checkpoint
         if count_n > 500:
             with sess_m.as_default():
                 with sess_m.graph.as_default():
                     print('update model to ' + os.path.join(args.save_dir, args.m_exp_name, str(epoch) + '.cptk'))
                     saver_m.save(sess_m, os.path.join(args.save_dir, args.m_exp_name, str(epoch) + '.cptk'))
-                    # if epoch % 10 == 0:
-                    # online_var = [i for i in tf.trainable_variables() if "agent_m_critic" in i.name]
-                    # print(sess_m.run(online_var[0]))
                     if epoch % 2 == 0 and args.benchmark:
                         pt_smallest, n = benchmark(test_pt_smallest, agent1_ddpg_test, agent_m_ddpg, sess1, sess_m)
                         if pt_smallest <= test_pt_smallest or n > 0:
@@ -519,6 +537,8 @@ def multi_intersections_train():
                             print("load cptk file from " + model_path)
                         summary_writer.add_summary(sess_m.run(pass_time_mean_op, {pass_time_mean: test_pt_smallest}),
                                                    epoch)
+
+        # 调整学习率，月训练越小，让模型收敛
         if epoch % 30 == 29:
             args.actor_lr = args.actor_lr * 0.9
             args.critic_lr = args.critic_lr * 0.9
